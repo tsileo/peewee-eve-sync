@@ -1,7 +1,11 @@
 # -*- coding: utf-8 -*-
 import peewee
 import logging
-from peewee_eve_sync.model import db, History, SyncedModel
+from peewee_eve_sync.model import History, SyncedModel, KeyValue
+from playhouse.test_utils import test_database
+from eve_mocker import EveMocker
+from httpretty import HTTPretty
+from tempfile import NamedTemporaryFile
 
 
 class ExcludeFilter(logging.Filter):
@@ -20,71 +24,54 @@ handler.setFormatter(logging.Formatter('%(asctime)s %(levelname)s: %(message)s')
 log.addHandler(handler)
 log.setLevel(logging.DEBUG)
 
-db.init(":memory:")
-History.create_table()
+test_db = peewee.SqliteDatabase(':memory:')
 
 
 class TestModel(SyncedModel):
     key = peewee.CharField()
+    content = peewee.CharField()
 
     class Sync:
         pk = "key"
 
-TestModel.create_table()
-
-tm = TestModel.create(key="ok")
-print tm._meta.name
-print
-print list(History.select())
-print
-import re
-from httpretty import HTTPretty
 HTTPretty.enable()
+EveMocker("http://localhost/api/", pk_maps={"testmodel": "key"}, default_pk="uuid")
 
-HTTPretty.register_uri(HTTPretty.GET, re.compile("http://localhost/api/testmodel/(.+)/"),
-                       responses=[HTTPretty.Response(body="", status=404),
-                                  HTTPretty.Response(body='{"etag": "sqdqsd"}', status=200)])
-
-HTTPretty.register_uri(HTTPretty.POST, "http://localhost/api/testmodel/",
-                       body='{"item": {"status": "OK", "etag": "sqdqsd"}}',
-                       content_type="application/json")
-
-HTTPretty.register_uri(HTTPretty.PATCH, "http://localhost/api/testmodel/",
-                       body='{"item": {"status": "OK", "etag": "sqdqsd2"}}',
-                       content_type="application/json")
-
-HTTPretty.register_uri(HTTPretty.DELETE, "http://localhost/api/testmodel/",
-                       body='{}',
-                       content_type="application/json")
+db1 = peewee.SqliteDatabase(NamedTemporaryFile().name)
+db2 = peewee.SqliteDatabase(NamedTemporaryFile().name)
 
 
-HTTPretty.register_uri(HTTPretty.POST, "http://localhost/api/history/",
-                       body='{"item": {"status": "OK", "etag": "sqdqsd"}}',
-                       content_type="application/json")
-
-HTTPretty.register_uri(HTTPretty.GET, re.compile("http://localhost/api/history/(.+)/"),
-                       responses=[HTTPretty.Response(body="", status=404)])
+def create_tables():
+    History.create_table()
+    TestModel.create_table()
+    KeyValue.create_table()
 
 
-HTTPretty.register_uri(HTTPretty.PATCH, re.compile("http://localhost/api/history/(.+)/"),
-                       responses=[HTTPretty.Response(body="", status=404)])
+with test_database(db1, (TestModel, History, KeyValue), create_tables=False):
+    print "inside test_db1"
+    create_tables()
+    print "before", list(TestModel.select())
+    tm = TestModel.create(key="ok", content="my content")
+    TestModel.sync()
+    print "after", list(TestModel.select())
 
 
-import json
-HTTPretty.register_uri(HTTPretty.GET, "http://localhost/api/history/",
-                       body=json.dumps({"_items": [{"data": '{"key": "ok"}',
-                                        "ts": 0,
-                                        "action": "create",
-                                        "model": "testmodel",
-                                        "pk": "ok",
-                                        "uuid": "azqdqds"}]}),
-                       content_type="application/json")
+with test_database(db2, (TestModel, History, KeyValue), create_tables=False):
+    print "inside test_db2"
+    create_tables()
+    print "before", list(TestModel.select())
+    TestModel.sync()
+    print "after", list(TestModel.select())
 
-tm.sync()
+
+with test_database(db1, (TestModel, History, KeyValue), create_tables=False):
+    print "inside test_db1"
+    print "before", list(TestModel.select())
+    print list(TestModel.select())
+    print "after", list(TestModel.select())
+
 
 HTTPretty.disable()
-
-print list(TestModel.select())
 
 # TODO ajouter des logs
 # TODO DRY HTTPretty

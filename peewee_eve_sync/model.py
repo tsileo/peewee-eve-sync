@@ -1,5 +1,4 @@
 # -*- coding: utf-8 -*-
-from playhouse.kv import PickledKeyStore
 import peewee
 from datetime import datetime
 import json
@@ -14,8 +13,6 @@ from remote import (get_remote_history,
 
 log = logging.getLogger(__name__)
 
-test_db = peewee.SqliteDatabase(':memory:')
-kv = PickledKeyStore(database=test_db)
 db = peewee.SqliteDatabase(None)
 
 
@@ -34,6 +31,46 @@ class JsonField(peewee.CharField):
 class BaseModel(peewee.Model):
     class Meta:
         database = db
+
+
+class KeyValue(BaseModel):
+    """ key => value store.
+
+    This custom KeyValue is used instead of the one in peewee
+    playground because it doesn't support deferred initialization.
+
+    """
+    key = peewee.CharField(index=True, unique=True)
+    value = JsonField()
+
+    @classmethod
+    def get_key(self, key, default=None):
+        try:
+            return KeyValue.get(KeyValue.key == key).value
+        except KeyValue.DoesNotExist:
+            return default
+
+    @classmethod
+    def set_key(self, key, value=None):
+        q = KeyValue.select().where(KeyValue.key == key)
+        if q.count():
+            KeyValue.update(value=value).where(KeyValue.key == key).execute()
+        else:
+            KeyValue.create(key=key, value=value)
+
+
+def get_etag(model, pk):
+    return KeyValue.get_key("etag:{0}:{1}".format(model, pk))
+
+
+def set_etag(model, pk, etag):
+    KeyValue.set_key("etag:{0}:{1}".format(model, pk), etag)
+
+
+def delete_etag(model, pk):
+    key = "etag:{0}:{1}".format(model, pk)
+    kv = KeyValue.get(KeyValue.key == key)
+    kv.delete_instance()
 
 
 class History(BaseModel):
@@ -94,12 +131,9 @@ class SyncedModel(BaseModel):
     @classmethod
     def get_by_pk(cls, pk):
         """ Try to get a model from its primary key. """
-        print cls.Sync.pk, pk
-        print cls, getattr(cls, cls.Sync.pk), pk
         try:
             return cls.get(getattr(cls, cls.Sync.pk) == pk)
         except cls.DoesNotExist:
-            print "DoesNotExist"
             return None
 
     @classmethod
@@ -111,7 +145,7 @@ class SyncedModel(BaseModel):
     def sync_push(cls, debug=False):
         """ Process the local History and perform calls to the API. """
         # 1. PUSH
-        last_sync = kv.get("last_dev_eve_sync_push", 0)
+        last_sync = KeyValue.get_key("last_dev_eve_sync_push", 0)
 
         for history in History.select().where(History.model == cls._meta.name,
                                               History.ts > last_sync):
@@ -119,24 +153,24 @@ class SyncedModel(BaseModel):
             if history.action == "create":
                 etag = post_resource(history.model, history.pk, history.data, raw_history=history._data)
                 if etag:
-                    kv["etag:{0}:{1}".format(history.model, history.pk)] = etag
+                    set_etag(history.model, history.pk, etag)
             elif history.action == "update":
-                etag = kv.get("etag:{0}:{1}".format(history.model, history.pk))
+                etag = get_etag(history.model, history.pk)
                 new_etag = patch_resource(history.model, history.pk, history.data, etag, raw_history=history._data)
                 # We update the etag locally
                 if new_etag:
-                    kv["etag:{0}:{1}".format(history.model, history.pk)] = new_etag
+                    set_etag(history.model, history.pk, new_etag)
             elif history.action == "delete":
-                etag = kv.get("etag:{0}:{1}".format(history.model, history.pk))
+                etag = get_etag(history.model, history.pk)
                 delete_resource(history.model, history.pk, etag, raw_history=history._data)
                 if etag:
-                    del kv["etag:{0}:{1}".format(history.model, history.pk)]
+                    delete_etag(history.model, history.pk)
 
-        kv['last_dev_eve_sync_push'] = int(datetime.utcnow().strftime("%s"))
+        KeyValue.set_key("last_dev_eve_sync_push", int(datetime.utcnow().strftime("%s")))
 
     @classmethod
     def sync_pull(cls, debug=False):
-        last_sync = kv.get("last_dev_eve_sync_pull", 0)
+        last_sync = KeyValue.get_key("last_dev_eve_sync_pull", 0)
 
         # 2. PULL
         remote_history = get_remote_history(cls._meta.name, last_sync)
@@ -151,28 +185,26 @@ class SyncedModel(BaseModel):
                     cls.create(**json.loads(history["data"]))
                     # Retrieve ETag from remote API
                     remote = get_resource(history["model"], history["pk"])
-                    kv["etag:{0}:{1}".format(history["model"], history["pk"])] = remote["etag"]
+                    set_etag(history["model"], history["pk"], remote["etag"])
             elif history["action"] == "update":
-                local_etag = kv.get("etag:{0}:{1}".format(history["model"], history["pk"]))
+                local_etag = get_etag(history["model"], history["pk"])
                 if local and local_etag:
                     remote = get_resource(history["model"], history["pk"])
                     # The update is performed only if the remote model is different from local
                     if local_etag != remote["etag"]:
-                        # Checker le update avant le etag??? pas de etag dans la réponse du update???
                         local.update(**json.loads(history["data"]))
-                        kv["etag:{0}:{1}".format(history["model"], history["pk"])] = remote["etag"]
+                        set_etag(history["model"], history["pk"], remote["etag"])
                 else:
                     log.error("item doesn't exists !")
 
             elif history["action"] == "delete":
                 if local:
                     local.delete_instance()
-                    if kv.get("etag:{0}:{1}".format(history["model"], history["pk"])):
-                        del kv["etag:{0}:{1}".format(history["model"], history["pk"])]
+                    delete_etag(history["model"], history["pk"])
                 else:
                     log.debug("Item already deleted")
 
-        kv["last_dev_eve_sync_pull"] = int(datetime.utcnow().strftime("%s"))
+        KeyValue.set_key("last_dev_eve_sync_pull", int(datetime.utcnow().strftime("%s")))
         # Faire l'appel a eve
         # ne pas oublier d'updater ETag
 

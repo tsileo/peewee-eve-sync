@@ -107,7 +107,6 @@ def post_resource(model, pk, data, raw_history=None):
 
 def get_resource(model, pk):
     """ Perform a GET request over a resource. """
-    print "get_resource", model, pk
     log.info("GET {0} {1}".format(model, pk))
     call_url = api_resource(model, pk)
     r = requests.get(call_url)
