@@ -122,11 +122,16 @@ class SyncedModel(BaseModel):
                     kv["etag:{0}:{1}".format(history.model, history.pk)] = etag
             elif history.action == "update":
                 etag = kv.get("etag:{0}:{1}".format(history.model, history.pk))
-                patch_resource(history.model, history.pk, history.data, etag, raw_history=history._data)
+                new_etag = patch_resource(history.model, history.pk, history.data, etag, raw_history=history._data)
+                # We update the etag locally
+                if new_etag:
+                    kv["etag:{0}:{1}".format(history.model, history.pk)] = new_etag
             elif history.action == "delete":
                 etag = kv.get("etag:{0}:{1}".format(history.model, history.pk))
-                # TODO delete etag
                 delete_resource(history.model, history.pk, etag, raw_history=history._data)
+                if etag:
+                    del kv["etag:{0}:{1}".format(history.model, history.pk)]
+
         kv['last_dev_eve_sync_push'] = int(datetime.utcnow().strftime("%s"))
 
     @classmethod
@@ -148,18 +153,24 @@ class SyncedModel(BaseModel):
                     remote = get_resource(history["model"], history["pk"])
                     kv["etag:{0}:{1}".format(history["model"], history["pk"])] = remote["etag"]
             elif history["action"] == "update":
-                if local:
-                    local.update(**json.loads(history["data"]))
-                    # Retrieve ETag from remote API
+                local_etag = kv.get("etag:{0}:{1}".format(history["model"], history["pk"]))
+                if local and local_etag:
                     remote = get_resource(history["model"], history["pk"])
-                    kv["etag:{0}:{1}".format(history["model"], history["pk"])] = remote["etag"]
+                    # The update is performed only if the remote model is different from local
+                    if local_etag != remote["etag"]:
+                        # Checker le update avant le etag??? pas de etag dans la réponse du update???
+                        local.update(**json.loads(history["data"]))
+                        kv["etag:{0}:{1}".format(history["model"], history["pk"])] = remote["etag"]
                 else:
-                    print "item doesn't exists !"
+                    log.error("item doesn't exists !")
+
             elif history["action"] == "delete":
                 if local:
                     local.delete_instance()
+                    if kv.get("etag:{0}:{1}".format(history["model"], history["pk"])):
+                        del kv["etag:{0}:{1}".format(history["model"], history["pk"])]
                 else:
-                    print "item doesn't exists !"
+                    log.debug("Item already deleted")
 
         kv["last_dev_eve_sync_pull"] = int(datetime.utcnow().strftime("%s"))
         # Faire l'appel a eve

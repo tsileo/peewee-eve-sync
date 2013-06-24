@@ -56,7 +56,12 @@ def patch_resource(model, pk, update, etag, raw_history=None):
             del raw_history["id"]  # Since we can't rely on autoincrement id, we use uuid
             # We also update the timestamp (ts)
             raw_history["ts"] = int(datetime.utcnow().strftime("%s"))
+
+            # The model is patched, so now we need to post this history entry to the API
             post_resource("history", raw_history.get("uuid"), json.dumps(raw_history))
+
+            return resp.get("etag")
+
     elif resp.get("status") == "ERR":
         log.error("Issue patching: {0}".format(payload))
         for issue in resp["issues"]:
@@ -67,7 +72,7 @@ def patch_resource(model, pk, update, etag, raw_history=None):
 
 def post_resource(model, pk, data, raw_history=None):
     """ Create a resource, but verify if it doesn't exist yet before.
-    Also user to POST history to the API.
+    Also used to POST history to the API.
 
     :return: resource ETag if successful, None if any error.
 

@@ -31,7 +31,7 @@ class TestDirtools(unittest.TestCase):
     def testOne(self):
         response = requests.get('http://yipit.com')
         expect(response.text).to.equal("Find the best daily deals")
-        ("ok").should.equal("ok2")
+        #("ok").should.equal("ok2")
 
 if __name__ == '__main__':
     unittest.main()

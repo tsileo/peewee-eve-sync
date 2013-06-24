@@ -45,12 +45,19 @@ HTTPretty.register_uri(HTTPretty.GET, re.compile("http://localhost/api/testmodel
                        responses=[HTTPretty.Response(body="", status=404),
                                   HTTPretty.Response(body='{"etag": "sqdqsd"}', status=200)])
 
-# TODO checker la réponse d'un POST
 HTTPretty.register_uri(HTTPretty.POST, "http://localhost/api/testmodel/",
                        body='{"item": {"status": "OK", "etag": "sqdqsd"}}',
                        content_type="application/json")
 
-# TODO checker la réponse d'un POST
+HTTPretty.register_uri(HTTPretty.PATCH, "http://localhost/api/testmodel/",
+                       body='{"item": {"status": "OK", "etag": "sqdqsd2"}}',
+                       content_type="application/json")
+
+HTTPretty.register_uri(HTTPretty.DELETE, "http://localhost/api/testmodel/",
+                       body='{}',
+                       content_type="application/json")
+
+
 HTTPretty.register_uri(HTTPretty.POST, "http://localhost/api/history/",
                        body='{"item": {"status": "OK", "etag": "sqdqsd"}}',
                        content_type="application/json")
@@ -58,14 +65,19 @@ HTTPretty.register_uri(HTTPretty.POST, "http://localhost/api/history/",
 HTTPretty.register_uri(HTTPretty.GET, re.compile("http://localhost/api/history/(.+)/"),
                        responses=[HTTPretty.Response(body="", status=404)])
 
+
+HTTPretty.register_uri(HTTPretty.PATCH, re.compile("http://localhost/api/history/(.+)/"),
+                       responses=[HTTPretty.Response(body="", status=404)])
+
+
 import json
 HTTPretty.register_uri(HTTPretty.GET, "http://localhost/api/history/",
                        body=json.dumps({"_items": [{"data": '{"key": "ok"}',
-                                            "ts": 0,
-                                            "action": "create",
-                                            "model": "testmodel",
-                                            "pk": "ok",
-                                            "uuid": "azqdqds"}]}),
+                                        "ts": 0,
+                                        "action": "create",
+                                        "model": "testmodel",
+                                        "pk": "ok",
+                                        "uuid": "azqdqds"}]}),
                        content_type="application/json")
 
 tm.sync()
@@ -73,3 +85,8 @@ tm.sync()
 HTTPretty.disable()
 
 print list(TestModel.select())
+
+# TODO ajouter des logs
+# TODO DRY HTTPretty
+# TODO => update and delete
+# TODO => multiple client with from playhouse.test_utils import test_database
