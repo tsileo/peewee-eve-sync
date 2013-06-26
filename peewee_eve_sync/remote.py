@@ -83,10 +83,8 @@ def post_resource(model, pk, data, raw_history=None):
     log.info("Posting {0} {1}: {2} (history={3}".format(model, pk, data, raw_history))
     call_url = api_resource(model, pk)
     r = requests.get(call_url)
-    print "POST", r.status_code
     if r.status_code == 404:
         payload = {"item": data}
-        print "POSTING", data
         r = requests.post(api_root(model),
                           payload)
         #try:

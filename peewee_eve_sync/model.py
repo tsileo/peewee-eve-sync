@@ -130,6 +130,22 @@ class SyncedModel(BaseModel):
         return "<{0} {1} (sync)>".format(self._meta.name, self._data.get(self.Sync.pk))
 
     @classmethod
+    def sync_auto(cls):
+        if cls.Sync.auto:
+            log.debug("trigger sync auto")
+            cls.sync()
+
+    @classmethod
+    def _select(cls, *selection):
+        """ Safe select, without syncing things. """
+        return super(SyncedModel, cls).select(*selection)
+
+    @classmethod
+    def select(cls, *selection):
+        cls.sync_auto()
+        return super(SyncedModel, cls).select(*selection)
+
+    @classmethod
     def create(cls, **attributes):
         if cls._meta.name != "history":
             History.create(data=json.dumps(dict(**attributes)),
@@ -137,7 +153,10 @@ class SyncedModel(BaseModel):
                            action="create",
                            model=cls._meta.name,
                            pk=attributes.get(cls.Sync.pk))
-        return super(SyncedModel, cls).create(**attributes)
+        _return = super(SyncedModel, cls).create(**attributes)
+        cls.sync_auto()
+
+        return _return
 
     @classmethod
     def _create(cls, **attributes):
@@ -164,17 +183,32 @@ class SyncedModel(BaseModel):
                            action="delete",
                            model=self._meta.name,
                            pk=self._data.get(self.Sync.pk))
-        return super(SyncedModel, self).delete_instance(self)
+        return super(SyncedModel, self).delete_instance()
 
     def _delete_instance(self):
         """ Safe delete_instance, without syncing things. """
-        return super(SyncedModel, self).delete_instance(self)
+        return super(SyncedModel, self).delete_instance()
+
+    @classmethod
+    def get(cls, *query, **kwargs):
+        cls.sync_auto()
+        return super(SyncedModel, cls)._get(*query, **kwargs)
+
+    @classmethod
+    def _get(cls, *query, **kwargs):
+        """ Rewrite of the orginal get to use _select instead of select. """
+        sq = cls._select().naive()
+        if query:
+            sq = sq.where(*query)
+        if kwargs:
+            sq = sq.filter(**kwargs)
+        return sq.get()
 
     @classmethod
     def get_by_pk(cls, pk):
         """ Try to get a model from its primary key. """
         try:
-            return cls.get(getattr(cls, cls.Sync.pk) == pk)
+            return cls._get(getattr(cls, cls.Sync.pk) == pk)
         except cls.DoesNotExist:
             return None
 
@@ -187,13 +221,17 @@ class SyncedModel(BaseModel):
     def sync_push(cls, debug=False):
         """ Process the local History and perform calls to the API. """
         # 1. PUSH
+        if debug:
+            log.debug("starting push")
+
         last_sync = KeyValue.get_key("last_dev_eve_sync_push", 0)
         if last_sync:
             last_sync -= SYNC_BUFFER
-        print "ENTERING PUSH"
         for history in History.select().where(History.model == cls._meta.name,
                                               History.ts > last_sync):
-            print "===>local history", history
+            if debug:
+                log.debug("current local history: {0}".format(history))
+
             if history.action == "create":
                 etag = post_resource(history.model, history.pk, history.data, raw_history=history._data)
                 if etag:
@@ -215,16 +253,26 @@ class SyncedModel(BaseModel):
     @classmethod
     def sync_pull(cls, debug=False):
         last_sync = KeyValue.get_key("last_dev_eve_sync_pull", 0)
-        print "ENTERING PULL"
+
+        if debug:
+            log.debug("starting pull")
+
         # 2. PULL
         remote_history = get_remote_history(cls._meta.name, last_sync)
         for history in remote_history:
-            print "===>remote history", history
+
+            if debug:
+                log.debug("receiving remote history: {0}".format(history))
+
             local = cls.get_by_pk(history["pk"])
-            print "local", local
+
+            if debug:
+                log.debug("local model version: {0}".format(local))
+
             if history["action"] == "create":
                 if not local:
-                    print "create from remote"
+                    if debug:
+                        log.debug("create from remote")
                     # Create from history data
                     cls._create(**json.loads(history["data"]))
                     # Retrieve ETag from remote API

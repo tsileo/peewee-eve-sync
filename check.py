@@ -10,19 +10,19 @@ from tempfile import NamedTemporaryFile
 
 class ExcludeFilter(logging.Filter):
     def filter(self, rec):
-        print rec.__dict__
         if rec.name.startswith("peewee_eve_sync") or rec.name == "root":
             return True
         else:
             return rec.levelno >= logging.WARNING
 
-log = logging.getLogger(__name__)
+log = logging.getLogger()
 
 handler = logging.StreamHandler()
-#handler.addFilter(ExcludeFilter())
+handler.addFilter(ExcludeFilter())
 handler.setFormatter(logging.Formatter('%(asctime)s %(levelname)s: %(message)s'))
+
 log.addHandler(handler)
-log.setLevel(logging.DEBUG)
+log.setLevel(logging.ERROR)
 
 test_db = peewee.SqliteDatabase(':memory:')
 
@@ -57,7 +57,6 @@ with test_database(db1, (TestModel, History, KeyValue), create_tables=False, dro
     create_tables()
     print "before", list(TestModel.select())
     tm = TestModel.create(key="ok", content="my content")
-    TestModel.sync()
     print "after", list(TestModel.select())
 
 print "##### STEP #2 #####"
@@ -69,16 +68,10 @@ print "###################"
 
 with test_database(db2, (TestModel, History, KeyValue), create_tables=False, drop_tables=False):
     create_tables()
-    TestModel.sync()
     print "before", list(TestModel.select())
     tm2 = TestModel.create(key="ok2", content="my content2")
     print "post create"
-    TestModel.sync()
     print "after->", list(TestModel.select())
-    TestModel.sync()
-
-import time
-time.sleep(2)
 
 print "##### STEP #3 #####"
 print " => db1"
@@ -87,9 +80,10 @@ print "###################"
 
 with test_database(db1, (TestModel, History, KeyValue), create_tables=False, drop_tables=False):
     #print "before", list(TestModel.select())
-    TestModel.sync()
     print "after=>", list(TestModel.select())
 
+# TODO check that .get auto sync works with get when an updated version is
+#       availabe on Eve
 
 HTTPretty.disable()
 
