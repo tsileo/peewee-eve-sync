@@ -15,7 +15,11 @@ log = logging.getLogger(__name__)
 
 db = peewee.SqliteDatabase(None)
 
-SYNC_BUFFER = 3
+SYNC_BUFFER = 2
+
+
+def get_ts():
+    return int(datetime.utcnow().strftime("%s"))
 
 """
 
@@ -149,7 +153,7 @@ class SyncedModel(BaseModel):
     def create(cls, **attributes):
         if cls._meta.name != "history":
             History.create(data=json.dumps(dict(**attributes)),
-                           ts=int(datetime.utcnow().strftime("%s")),
+                           ts=get_ts(),
                            action="create",
                            model=cls._meta.name,
                            pk=attributes.get(cls.Sync.pk))
@@ -166,11 +170,14 @@ class SyncedModel(BaseModel):
     def update(self, **update):
         if self._meta.name != "history":
             History.create(data=json.dumps(dict(**update)),
-                           ts=int(datetime.utcnow().strftime("%s")),
+                           ts=get_ts(),
                            action="update",
                            model=self._meta.name,
                            pk=self._data.get(self.Sync.pk))
-        return super(SyncedModel, self).update(**update)
+        _return = super(SyncedModel, self).update(**update)
+        self.sync_auto()
+
+        return _return
 
     def _update(self, **update):
         """ Safe update, without syncing things. """
@@ -179,11 +186,14 @@ class SyncedModel(BaseModel):
     def delete_instance(self):
         if self._meta.name != "history":
             History.create(data={},
-                           ts=int(datetime.utcnow().strftime("%s")),
+                           ts=get_ts(),
                            action="delete",
                            model=self._meta.name,
                            pk=self._data.get(self.Sync.pk))
-        return super(SyncedModel, self).delete_instance()
+        _return = super(SyncedModel, self).delete_instance()
+        self.sync_auto()
+
+        return _return
 
     def _delete_instance(self):
         """ Safe delete_instance, without syncing things. """
@@ -192,7 +202,7 @@ class SyncedModel(BaseModel):
     @classmethod
     def get(cls, *query, **kwargs):
         cls.sync_auto()
-        return super(SyncedModel, cls)._get(*query, **kwargs)
+        return cls._get(*query, **kwargs)
 
     @classmethod
     def _get(cls, *query, **kwargs):
@@ -248,7 +258,7 @@ class SyncedModel(BaseModel):
                 if etag:
                     delete_etag(history.model, history.pk)
 
-        KeyValue.set_key("last_dev_eve_sync_push", int(datetime.utcnow().strftime("%s")))
+        KeyValue.set_key("last_dev_eve_sync_push", get_ts())
 
     @classmethod
     def sync_pull(cls, debug=False):
@@ -260,7 +270,7 @@ class SyncedModel(BaseModel):
         # 2. PULL
         remote_history = get_remote_history(cls._meta.name, last_sync)
         for history in remote_history:
-
+            log.info(history)
             if debug:
                 log.debug("receiving remote history: {0}".format(history))
 
@@ -282,21 +292,26 @@ class SyncedModel(BaseModel):
                 local_etag = get_etag(history["model"], history["pk"])
                 if local and local_etag:
                     remote = get_resource(history["model"], history["pk"])
+                    log.info("remote item to be updated: {0}".format(remote))
+                    log.info(local_etag)
                     # The update is performed only if the remote model is different from local
                     if local_etag != remote["etag"]:
-                        local.update(**json.loads(history["data"]))
+                        log.info(local._data)
+                        ures = local._update(**json.loads(history["data"]))
+                        log.info(ures)
+                        log.info("local update {0}".format(json.loads(history["data"])))
                         set_etag(history["model"], history["pk"], remote["etag"])
                 else:
                     log.error("item doesn't exists !")
 
             elif history["action"] == "delete":
                 if local:
-                    local.delete_instance()
+                    local._delete_instance()
                     delete_etag(history["model"], history["pk"])
                 else:
                     log.debug("Item already deleted")
 
-        KeyValue.set_key("last_dev_eve_sync_pull", int(datetime.utcnow().strftime("%s")))
+        KeyValue.set_key("last_dev_eve_sync_pull", get_ts())
 
     class Sync(SyncSettings):
         pass

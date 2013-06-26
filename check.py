@@ -6,6 +6,7 @@ from playhouse.test_utils import test_database
 from eve_mocker import EveMocker
 from httpretty import HTTPretty
 from tempfile import NamedTemporaryFile
+import time
 
 
 class ExcludeFilter(logging.Filter):
@@ -50,7 +51,6 @@ print "##### STEP #1 #####"
 print " => db1"
 print " - create tables"
 print " - create <ok>"
-print " - sync"
 print "###################"
 
 with test_database(db1, (TestModel, History, KeyValue), create_tables=False, drop_tables=False):
@@ -59,11 +59,11 @@ with test_database(db1, (TestModel, History, KeyValue), create_tables=False, dro
     tm = TestModel.create(key="ok", content="my content")
     print "after", list(TestModel.select())
 
+time.sleep(2)
 print "##### STEP #2 #####"
 print " => db2"
 print " - create tables"
 print " - create <ok2>"
-print " - sync"
 print "###################"
 
 with test_database(db2, (TestModel, History, KeyValue), create_tables=False, drop_tables=False):
@@ -73,14 +73,73 @@ with test_database(db2, (TestModel, History, KeyValue), create_tables=False, dro
     print "post create"
     print "after->", list(TestModel.select())
 
+print time.sleep(2)
 print "##### STEP #3 #####"
 print " => db1"
-print " - sync"
+print " - check if <ok2> is here"
 print "###################"
 
 with test_database(db1, (TestModel, History, KeyValue), create_tables=False, drop_tables=False):
     #print "before", list(TestModel.select())
     print "after=>", list(TestModel.select())
+
+time.sleep(2)
+print "##### STEP #4 #####"
+print " => db2"
+print " - update <ok>"
+print "###################"
+
+with test_database(db2, (TestModel, History, KeyValue), create_tables=False, drop_tables=False):
+    print "before", list(TestModel.select())
+    ok1 = TestModel.get(TestModel.key == "ok")
+    print ok1._data, "pre update"
+    ok1.update(content="my updated content")
+    print "after->", list(TestModel.select())
+
+print "##### STEP #5 #####"
+print " => db1"
+print " - check if <ok> is updated"
+print " ======> pq il est updated????"
+print " - delete <ok2>"
+print "###################"
+import time
+with test_database(db1, (TestModel, History, KeyValue), create_tables=False, drop_tables=False):
+    print list(History.select())
+    print list(TestModel._select())
+    time.sleep(2)
+    print "ok1 updated:", TestModel.get(TestModel.key == "ok")._data
+    print "before", list(TestModel.select())
+    ok2 = TestModel.get(TestModel.key == "ok2")
+    print ok2._data, "pre delete"
+    ok2.delete_instance()
+    time.sleep(2)
+    print "after=>", list(TestModel.select())
+
+print "##### STEP #6 #####"
+print " => db2"
+print " - check if ok2 is deleted"
+print " - create <ok3>"
+print "###################"
+time.sleep(2)
+with test_database(db2, (TestModel, History, KeyValue), create_tables=False, drop_tables=False):
+    time.sleep(2)
+    print "before", list(TestModel.select())
+    time.sleep(2)
+    tm2 = TestModel.create(key="ok3", content="my content3")
+    print "post create"
+    print "after->", list(TestModel.select())
+
+time.sleep(2)
+print "##### STEP #7 #####"
+print " => db1"
+print " - check if <ok> and <ok3> are here"
+print "###################"
+
+with test_database(db1, (TestModel, History, KeyValue), create_tables=False, drop_tables=False):
+    #print "before", list(TestModel.select())
+    print "after=>", list(TestModel.select())
+
+"""
 
 # TODO check that .get auto sync works with get when an updated version is
 #       availabe on Eve
@@ -91,3 +150,4 @@ HTTPretty.disable()
 # TODO DRY HTTPretty
 # TODO => update and delete
 # TODO => multiple client with from playhouse.test_utils import test_database
+"""

@@ -18,29 +18,25 @@ def get_remote_history(model, last_sync=0):
         last_sync -= SYNC_BUFFER
     r = requests.get(api_root('history'),
                      params={"where": json.dumps({"ts": {"$gte": last_sync},
-                                                  "model": model})})
+                                                  "model": model}),
+                             "sort": json.dumps({"ts": 1})})
     r.raise_for_status()
     return r.json().get("_items", [])
 
 
 def delete_resource(model, pk, etag, raw_history=None):
     """ Delete a resource. """
-    log.info("Deleting resource {0} {1} (etag={2}, history={3}".format(model, pk, etag, raw_history))
-    r = requests.delete(api_resource(model, pk),
-                        headers={"If-Match": etag})
-    r.raise_for_status()
-    resp = r.json()
-    log.info(resp)
-    if resp.get("status") == "OK":
+    if etag:
+        log.info("Deleting resource {0} {1} (etag={2}, history={3}".format(model, pk, etag, raw_history))
+        r = requests.delete(api_resource(model, pk),
+                            headers={"If-Match": etag})
+        r.raise_for_status()
+
         del raw_history["id"]
         raw_history["ts"] = int(datetime.utcnow().strftime("%s"))
         post_resource("history", raw_history.get("uuid"), json.dumps(raw_history))
         return True
-    elif resp.get("status") != "OK":
-        log.error("Issue deleting: {0} <{1}>".format(model, pk))
-        for issue in resp["issues"]:
-            log.error(issue)
-        return False
+    return False
 
 
 def patch_resource(model, pk, update, etag, raw_history=None):
@@ -80,10 +76,10 @@ def post_resource(model, pk, data, raw_history=None):
     :return: resource ETag if successful, None if any error.
 
     """
-    log.info("Posting {0} {1}: {2} (history={3}".format(model, pk, data, raw_history))
     call_url = api_resource(model, pk)
     r = requests.get(call_url)
     if r.status_code == 404:
+        log.info("Posting {0} {1}: {2} (history={3}".format(model, pk, data, raw_history))
         payload = {"item": data}
         r = requests.post(api_root(model),
                           payload)
