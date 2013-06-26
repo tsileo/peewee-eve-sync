@@ -13,8 +13,11 @@ api_resource = "http://localhost/api/{0}/{1}/".format
 def get_remote_history(model, last_sync=0):
     """ Fetch the remote history over the API since last sync. """
     log.info("Fetching remote history since {0}".format(last_sync))
+    if last_sync:
+        from .model import SYNC_BUFFER
+        last_sync -= SYNC_BUFFER
     r = requests.get(api_root('history'),
-                     params={"where": json.dumps({"ts": {"$gt": last_sync},
+                     params={"where": json.dumps({"ts": {"$gte": last_sync},
                                                   "model": model})})
     r.raise_for_status()
     return r.json().get("_items", [])
@@ -80,8 +83,10 @@ def post_resource(model, pk, data, raw_history=None):
     log.info("Posting {0} {1}: {2} (history={3}".format(model, pk, data, raw_history))
     call_url = api_resource(model, pk)
     r = requests.get(call_url)
+    print "POST", r.status_code
     if r.status_code == 404:
         payload = {"item": data}
+        print "POSTING", data
         r = requests.post(api_root(model),
                           payload)
         #try:

@@ -53,7 +53,7 @@ print " - create <ok>"
 print " - sync"
 print "###################"
 
-with test_database(db1, (TestModel, History, KeyValue), create_tables=False, drop_tables=False):
+with test_database(db1, (TestModel, History, KeyValue), create_tables=False):
     create_tables()
     print "before", list(TestModel.select())
     tm = TestModel.create(key="ok", content="my content")
@@ -67,28 +67,49 @@ print " - create <ok2>"
 print " - sync"
 print "###################"
 
-with test_database(db2, (TestModel, History, KeyValue), create_tables=False, drop_tables=False):
+with test_database(db2, (TestModel, History, KeyValue), create_tables=False):
     create_tables()
     TestModel.sync()
     print "before", list(TestModel.select())
     tm2 = TestModel.create(key="ok2", content="my content2")
-    print "post create"
-    TestModel.sync()
     print "after->", list(TestModel.select())
-    TestModel.sync()
-
-import time
-time.sleep(2)
 
 print "##### STEP #3 #####"
 print " => db1"
 print " - sync"
 print "###################"
 
-with test_database(db1, (TestModel, History, KeyValue), create_tables=False, drop_tables=False):
+with test_database(db1, (TestModel, History, KeyValue), create_tables=False):
     #print "before", list(TestModel.select())
-    TestModel.sync()
     print "after=>", list(TestModel.select())
+
+print "##### STEP #4 #####"
+print " => db2"
+print " - sync"
+print "###################"
+
+with test_database(db2, (TestModel, History, KeyValue), create_tables=False):
+    #print "before", list(TestModel.select())
+    print "after", list(TestModel.select())
+
+
+print "##### STEP #5 #####"
+print " => db1"
+print " - sync"
+print "###################"
+
+with test_database(db1, (TestModel, History, KeyValue), create_tables=False):
+    #print "before", list(TestModel.select())
+    print "after=>", list(TestModel.select())
+
+print "##### STEP #6 #####"
+print " => db2"
+print " - sync"
+print "###################"
+
+with test_database(db2, (TestModel, History, KeyValue), create_tables=False):
+    #print "before", list(TestModel.select())
+    print "after", list(TestModel.select())
 
 
 HTTPretty.disable()
