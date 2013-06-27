@@ -55,9 +55,16 @@ print "###################"
 
 with test_database(db1, (TestModel, History, KeyValue), create_tables=False, drop_tables=False):
     create_tables()
+    #TestModel.Sync.auto = False
     print "before", list(TestModel.select())
     tm = TestModel.create(key="ok", content="my content")
     print "after", list(TestModel.select())
+    """
+    tm1 = TestModel.get(TestModel.key == "ok")
+    tm1.content = "my new content"
+    tm1.save()
+    print TestModel.get(TestModel.key == "ok")._data
+    """
 
 time.sleep(2)
 print "##### STEP #2 #####"
@@ -93,27 +100,27 @@ with test_database(db2, (TestModel, History, KeyValue), create_tables=False, dro
     print "before", list(TestModel.select())
     ok1 = TestModel.get(TestModel.key == "ok")
     print ok1._data, "pre update"
-    ok1.update(content="my updated content")
+    ok1.content = "my updated content"
+    ok1.save()
+    print ok1._data, "post update"
     print "after->", list(TestModel.select())
 
+time.sleep(2)
 print "##### STEP #5 #####"
 print " => db1"
 print " - check if <ok> is updated"
-print " ======> pq il est updated????"
+print " ======> pq il est NOT actually UPDATED????"
 print " - delete <ok2>"
 print "###################"
-import time
+
 with test_database(db1, (TestModel, History, KeyValue), create_tables=False, drop_tables=False):
-    print list(History.select())
-    print list(TestModel._select())
-    time.sleep(2)
     print "ok1 updated:", TestModel.get(TestModel.key == "ok")._data
     print "before", list(TestModel.select())
     ok2 = TestModel.get(TestModel.key == "ok2")
     print ok2._data, "pre delete"
     ok2.delete_instance()
-    time.sleep(2)
-    print "after=>", list(TestModel.select())
+#    print "after=>", list(TestModel.select())
+
 
 print "##### STEP #6 #####"
 print " => db2"
@@ -139,7 +146,6 @@ with test_database(db1, (TestModel, History, KeyValue), create_tables=False, dro
     #print "before", list(TestModel.select())
     print "after=>", list(TestModel.select())
 
-"""
 
 # TODO check that .get auto sync works with get when an updated version is
 #       availabe on Eve
@@ -150,4 +156,4 @@ HTTPretty.disable()
 # TODO DRY HTTPretty
 # TODO => update and delete
 # TODO => multiple client with from playhouse.test_utils import test_database
-"""
+""""""

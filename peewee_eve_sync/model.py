@@ -1,5 +1,6 @@
 # -*- coding: utf-8 -*-
 import peewee
+from peewee import Query, not_allowed
 from datetime import datetime
 import json
 import logging
@@ -17,6 +18,37 @@ db = peewee.SqliteDatabase(None)
 
 SYNC_BUFFER = 2
 
+"""
+class UpdateQuerySync(Query):
+    def __init__(self, model_class, update=None):
+        self._update = update
+        self.is_synced = issubclass(model_class, SyncedModel)
+        if update and self.is_synced:
+            for k, v in update.items():
+                print k, type(k), k.__dict__, v
+            self.update_data = dict([(k.db_column, v) for k, v in update.items()])
+            print self.update_data
+        super(UpdateQuerySync, self).__init__(model_class)
+
+    def clone(self):
+        query = super(UpdateQuerySync, self).clone()
+        query._update = dict(self._update)
+        return query
+
+    join = not_allowed('joining')
+
+    def sql(self):
+        return self.compiler().generate_update(self)
+
+    def execute(self):
+        _execute = self._execute()
+        _return = self.database.rows_affected(_execute)
+        if self.is_synced:
+            self.model_class.sync_auto()
+        return _return
+
+peewee.UpdateQuery = UpdateQuerySync
+"""
 
 def get_ts():
     return int(datetime.utcnow().strftime("%s"))
@@ -129,13 +161,19 @@ class History(BaseModel):
 class SyncedModel(BaseModel):
     """ A base model to sync a peewee Model over a Eve REST API.
     Synchronization is history based, and works with multiple clients.
+
+    Limitations:
+
+    - Update must be done on model instance
+        by setting attribute and calling save/no update on mutltiple records.
+
     """
     def __repr__(self):
         return "<{0} {1} (sync)>".format(self._meta.name, self._data.get(self.Sync.pk))
 
     @classmethod
     def sync_auto(cls):
-        if cls.Sync.auto:
+        if cls.Sync.auto and cls._meta.name != "history":
             log.debug("trigger sync auto")
             cls.sync()
 
@@ -157,31 +195,33 @@ class SyncedModel(BaseModel):
                            action="create",
                            model=cls._meta.name,
                            pk=attributes.get(cls.Sync.pk))
-        _return = super(SyncedModel, cls).create(**attributes)
-        cls.sync_auto()
-
-        return _return
+        return super(SyncedModel, cls).create(**attributes)
 
     @classmethod
     def _create(cls, **attributes):
         """ Safe create, without syncing things. """
         return super(SyncedModel, cls).create(**attributes)
 
-    def update(self, **update):
-        if self._meta.name != "history":
-            History.create(data=json.dumps(dict(**update)),
+    def save(self, force_insert=False, only=None):
+        if self._meta.name != "history" and self.get_id():
+            # we perform an update
+            update_data = dict(self._data)
+            if "id" in update_data:
+                del update_data["id"]
+
+            History.create(data=json.dumps(update_data),
                            ts=get_ts(),
                            action="update",
                            model=self._meta.name,
                            pk=self._data.get(self.Sync.pk))
-        _return = super(SyncedModel, self).update(**update)
+
+        _return = super(SyncedModel, self).save(force_insert=False, only=None)
         self.sync_auto()
 
         return _return
 
-    def _update(self, **update):
-        """ Safe update, without syncing things. """
-        return super(SyncedModel, self).update(**update)
+    def _save(self, force_insert=False, only=None):
+        return super(SyncedModel, self).save(force_insert=False, only=None)
 
     def delete_instance(self):
         if self._meta.name != "history":
@@ -224,8 +264,12 @@ class SyncedModel(BaseModel):
 
     @classmethod
     def sync(cls, debug=False):
-        cls.sync_push(debug)
-        cls.sync_pull(debug)
+        try:
+            cls.sync_push(debug)
+            cls.sync_pull(debug)
+        except Exception, exc:
+            log.error("Error while syncing")
+            log.exception(exc)
 
     @classmethod
     def sync_push(cls, debug=False):
@@ -238,7 +282,7 @@ class SyncedModel(BaseModel):
         if last_sync:
             last_sync -= SYNC_BUFFER
         for history in History.select().where(History.model == cls._meta.name,
-                                              History.ts > last_sync):
+                                              History.ts >= last_sync):
             if debug:
                 log.debug("current local history: {0}".format(history))
 
@@ -297,8 +341,8 @@ class SyncedModel(BaseModel):
                     # The update is performed only if the remote model is different from local
                     if local_etag != remote["etag"]:
                         log.info(local._data)
-                        ures = local._update(**json.loads(history["data"]))
-                        log.info(ures)
+                        for k, v in json.loads(history["data"]).items():
+                            setattr(local, k, v)
                         log.info("local update {0}".format(json.loads(history["data"])))
                         set_etag(history["model"], history["pk"], remote["etag"])
                 else:
