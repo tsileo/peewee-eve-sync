@@ -119,7 +119,10 @@ class KeyValue(BaseModel):
 
 
 def get_etag(model, pk):
-    return KeyValue.get_key("etag:{0}:{1}".format(model, pk))
+    try:
+        return KeyValue.get_key("etag:{0}:{1}".format(model, pk))
+    except:
+        return
 
 
 def set_etag(model, pk, etag):
@@ -127,10 +130,13 @@ def set_etag(model, pk, etag):
 
 
 def delete_etag(model, pk):
-    key = "etag:{0}:{1}".format(model, pk)
-    kv = KeyValue.get(KeyValue.key == key)
-    kv.delete_instance()
-
+    try:
+        key = "etag:{0}:{1}".format(model, pk)
+        kv = KeyValue.get(KeyValue.key == key)
+        kv.delete_instance()
+    except:
+        # TODO voir pq
+        return
 
 class History(BaseModel):
     """ History for sync.
@@ -150,6 +156,13 @@ class History(BaseModel):
         """ Safe create, without syncing things. """
         attributes["uuid"] = uuid.uuid4()
         return super(History, cls).create(**attributes)
+
+    @property
+    def is_synced(self):
+        return KeyValue.get_key("history:{0}".format(self.uuid), False)
+
+    def synced(self):
+        KeyValue.set_key("history:{0}".format(self.uuid), True)
 
     def __repr__(self):
         return "<History: {model}/{action}/{uuid}>".format(**self._data)
@@ -221,6 +234,7 @@ class SyncedModel(BaseModel):
         return _return
 
     def _save(self, force_insert=False, only=None):
+        """ Safe save, without syncing things. """
         return super(SyncedModel, self).save(force_insert=False, only=None)
 
     def delete_instance(self):
@@ -263,13 +277,19 @@ class SyncedModel(BaseModel):
             return None
 
     @classmethod
-    def sync(cls, debug=False):
+    def sync(cls, debug=True):
+        if debug:
+            log.debug("Starting sync")
+
         try:
             cls.sync_push(debug)
             cls.sync_pull(debug)
         except Exception, exc:
             log.error("Error while syncing")
             log.exception(exc)
+
+        if debug:
+            log.debug("End sync")
 
     @classmethod
     def sync_push(cls, debug=False):
@@ -284,23 +304,30 @@ class SyncedModel(BaseModel):
         for history in History.select().where(History.model == cls._meta.name,
                                               History.ts >= last_sync):
             if debug:
-                log.debug("current local history: {0}".format(history))
+                log.debug("history.is_synced {0}".format(history.is_synced))
 
-            if history.action == "create":
-                etag = post_resource(history.model, history.pk, history.data, raw_history=history._data)
-                if etag:
-                    set_etag(history.model, history.pk, etag)
-            elif history.action == "update":
-                etag = get_etag(history.model, history.pk)
-                new_etag = patch_resource(history.model, history.pk, history.data, etag, raw_history=history._data)
-                # We update the etag locally
-                if new_etag:
-                    set_etag(history.model, history.pk, new_etag)
-            elif history.action == "delete":
-                etag = get_etag(history.model, history.pk)
-                delete_resource(history.model, history.pk, etag, raw_history=history._data)
-                if etag:
-                    delete_etag(history.model, history.pk)
+            if not history.is_synced:
+                if debug:
+                    log.debug("current local history: {0}".format(history))
+
+                if history.action == "create":
+                    etag = post_resource(history.model, history.pk, history.data, raw_history=history._data)
+                    if etag:
+                        set_etag(history.model, history.pk, etag)
+                        history.synced()
+                elif history.action == "update":
+                    etag = get_etag(history.model, history.pk)
+                    new_etag = patch_resource(history.model, history.pk, history.data, etag, raw_history=history._data)
+                    # We update the etag locally
+                    if new_etag:
+                        set_etag(history.model, history.pk, new_etag)
+                        history.synced()
+                elif history.action == "delete":
+                    etag = get_etag(history.model, history.pk)
+                    delete_resource(history.model, history.pk, etag, raw_history=history._data)
+                    history.synced()
+                    if etag:
+                        delete_etag(history.model, history.pk)
 
         KeyValue.set_key("last_dev_eve_sync_push", get_ts())
 
@@ -331,20 +358,26 @@ class SyncedModel(BaseModel):
                     cls._create(**json.loads(history["data"]))
                     # Retrieve ETag from remote API
                     remote = get_resource(history["model"], history["pk"])
-                    set_etag(history["model"], history["pk"], remote["etag"])
+                    #print "REMOTE CREATE", remote, history
+                    if remote:
+                        set_etag(history["model"], history["pk"], remote["etag"])
+                        #print "ETAG", get_etag(history["model"], history["pk"])
             elif history["action"] == "update":
                 local_etag = get_etag(history["model"], history["pk"])
+                # TODO voir pq le etag dans history
                 if local and local_etag:
                     remote = get_resource(history["model"], history["pk"])
-                    log.info("remote item to be updated: {0}".format(remote))
-                    log.info(local_etag)
-                    # The update is performed only if the remote model is different from local
-                    if local_etag != remote["etag"]:
-                        log.info(local._data)
-                        for k, v in json.loads(history["data"]).items():
-                            setattr(local, k, v)
-                        log.info("local update {0}".format(json.loads(history["data"])))
-                        set_etag(history["model"], history["pk"], remote["etag"])
+                    if remote:  #  voir pq utile pour la deletion
+                        log.info("remote item to be updated: {0}".format(remote))
+                        log.info(local_etag)
+                        # The update is performed only if the remote model is different from local
+                        if local_etag != remote["etag"]:
+                            log.info(local._data)
+                            for k, v in json.loads(history["data"]).items():
+                                setattr(local, k, v)
+                            local._save()
+                            log.info("local update {0}".format(json.loads(history["data"])))
+                            set_etag(history["model"], history["pk"], remote["etag"])
                 else:
                     log.error("item doesn't exists !")
 

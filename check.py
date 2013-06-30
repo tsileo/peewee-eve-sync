@@ -38,8 +38,8 @@ class TestModel(SyncedModel):
 HTTPretty.enable()
 EveMocker("http://localhost/api/", pk_maps={"testmodel": "key"}, default_pk="uuid")
 
-db1 = peewee.SqliteDatabase(NamedTemporaryFile().name)
-db2 = peewee.SqliteDatabase(NamedTemporaryFile().name)
+db1 = peewee.SqliteDatabase(":memory:") # NamedTemporaryFile().name)
+db2 = peewee.SqliteDatabase(":memory:") # NamedTemporaryFile().name)
 
 
 def create_tables():
@@ -55,6 +55,7 @@ print "###################"
 
 with test_database(db1, (TestModel, History, KeyValue), create_tables=False, drop_tables=False):
     create_tables()
+    print list(History.select())
     #TestModel.Sync.auto = False
     print "before", list(TestModel.select())
     tm = TestModel.create(key="ok", content="my content")
@@ -75,6 +76,7 @@ print "###################"
 
 with test_database(db2, (TestModel, History, KeyValue), create_tables=False, drop_tables=False):
     create_tables()
+    print list(History.select())
     print "before", list(TestModel.select())
     tm2 = TestModel.create(key="ok2", content="my content2")
     print "post create"
@@ -120,7 +122,6 @@ with test_database(db1, (TestModel, History, KeyValue), create_tables=False, dro
     print ok2._data, "pre delete"
     ok2.delete_instance()
 #    print "after=>", list(TestModel.select())
-
 
 print "##### STEP #6 #####"
 print " => db2"
