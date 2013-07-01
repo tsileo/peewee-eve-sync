@@ -60,6 +60,11 @@ class TestPeeweeEveSync(unittest.TestCase):
             if not m.table_exists():
                 m.create_table()
 
+    def _autoSync(self):
+        for m in self.models:
+            if issubclass(m, SyncedModel):
+                m.Sync.auto = True
+
     def _rawEntries(self, select):
         """ Return dict from Models and remove id on the fly. """
         out = []
@@ -80,6 +85,7 @@ class TestPeeweeEveSync(unittest.TestCase):
         nb_items = int(NB_ITEMS * FIRST_INSERT)
         with test_database(self.dbs[0], self.models, create_tables=False):
             self._createTables()
+            self._autoSync()
             for item in self.items[:nb_items]:
                 TestModel.create(**item)
 
@@ -91,11 +97,13 @@ class TestPeeweeEveSync(unittest.TestCase):
         for db in self.dbs:
             with test_database(self.dbs[db], self.models, create_tables=False):
                 self._createTables()
+                self._autoSync()
                 self._rawEntries(TestModel.select()).should.be.equal(self.items[:nb_items])
 
         # We edit an item on db2
         with test_database(self.dbs[2], self.models, create_tables=False):
             self._createTables()
+            self._autoSync()
             cmodel = TestModel.get(TestModel.key == "ok0")
             cmodel.content = "new content0"
             cmodel.save()
@@ -108,6 +116,7 @@ class TestPeeweeEveSync(unittest.TestCase):
         for db in self.dbs:
             with test_database(self.dbs[db], self.models, create_tables=False):
                 self._createTables()
+                self._autoSync()
                 cmodel = TestModel.get(TestModel.key == "ok0")
                 cmodel.content.should.be.equal("new content0")
 
@@ -115,6 +124,7 @@ class TestPeeweeEveSync(unittest.TestCase):
         # No we delete the 3 items, and we insert 4-9 on db3
         with test_database(self.dbs[1], self.models, create_tables=False):
             self._createTables()
+            self._autoSync()
             for m in TestModel._select():
                 m.delete_instance()
             for item in self.items[last_items:]:
@@ -128,10 +138,12 @@ class TestPeeweeEveSync(unittest.TestCase):
         for db in self.dbs:
             with test_database(self.dbs[db], self.models, create_tables=False):
                 self._createTables()
+                self._autoSync()
                 entries = TestModel.select()
                 self._rawEntries(entries).should.be.equal(self.items[last_items:])
 
-        # TODO faire le tout delete et checker emty
+        # TODO faire le tout delete et checker empty
+        # TODO remove le Item doesn't exists
 
 if __name__ == '__main__':
     unittest.main()

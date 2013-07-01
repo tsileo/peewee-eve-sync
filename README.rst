@@ -42,12 +42,12 @@ Model.get(), then Model.delete_instance()
 Auto Sync
 ---------
 
-Auto sync is enabled by default, you disable it by setting the Sync setting auto to False.
+Auto sync is disabled by default, you enable it by setting the Sync setting auto to True.
 
 
 .. code-block:: python
 
-    Model.Sync.auto = False
+    Model.Sync.auto = True
 
 TOTO
 ====

@@ -71,7 +71,7 @@ def get_ts():
 
 
 class SyncSettings:
-    auto = True
+    auto = False
     pk = "uuid"
 
 
@@ -378,8 +378,8 @@ class SyncedModel(BaseModel):
                             local._save()
                             log.info("local update {0}".format(json.loads(history["data"])))
                             set_etag(history["model"], history["pk"], remote["etag"])
-                else:
-                    log.error("item doesn't exists !")
+                elif debug:
+                    log.debug("item doesn't exists !")
 
             elif history["action"] == "delete":
                 if local:
