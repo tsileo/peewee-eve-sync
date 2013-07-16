@@ -2,6 +2,8 @@
  Peewee-Eve-Sync
 =================
 
+**/ ! \ THIS IS A WIP / ! \**
+
 Synchronization over a Eve powered REST API for Peewee Models.
 
 Getting Started
